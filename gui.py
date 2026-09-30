@@ -27,6 +27,7 @@ class FlashApp(tk.Tk):
         super().__init__()
         self.title('MultiFlash')
         self.minsize(800, 480)
+        self.geometry('900x760')
 
         self._default_image       = default_image
         self._set_default_image   = set_default_image
@@ -92,7 +93,7 @@ class FlashApp(tk.Tk):
         dev_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10))
 
         columns = ('path', 'size', 'model', 'extract')
-        self._tree = ttk.Treeview(dev_frame, columns=columns,
+        self._tree = ttk.Treeview(dev_frame, columns=columns, height=14,
                                   show='headings', selectmode='extended')
         self._tree.heading('path',    text='Device')
         self._tree.heading('size',    text='Size')
