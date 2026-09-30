@@ -45,16 +45,49 @@ def set_default_image(path: str) -> None:
         json.dump(config, f, indent=2)
 
 
+def get_system_disk() -> str | None:
+    """Name (e.g. 'mmcblk0') of the whole disk holding /, or None if unknown.
+
+    Used to keep the running system's own disk out of the target list: on a Pi
+    that disk is a hotplug SD card or USB SSD, so nothing else excludes it.
+    """
+    try:
+        src = subprocess.run(['findmnt', '-n', '-o', 'SOURCE', '/'],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        if not src.startswith('/dev/'):
+            return None
+        parent = subprocess.run(['lsblk', '-no', 'PKNAME', src],
+                                capture_output=True, text=True, check=True).stdout.strip()
+        # PKNAME is empty when / sits on a whole disk rather than a partition.
+        return parent.splitlines()[0] if parent else os.path.basename(src)
+    except Exception:
+        return None
+
+
+def _is_hotplug(value) -> bool:
+    """lsblk reports HOTPLUG as a bool, or as the string '0'/'1' on older
+    util-linux - where a bare truth test wrongly accepts '0'."""
+    if isinstance(value, str):
+        return value.strip() == '1'
+    return bool(value)
+
+
 def get_removable_devices() -> list[dict]:
     try:
         out = subprocess.run(
             ['lsblk', '-J', '-o', 'NAME,SIZE,MODEL,HOTPLUG,TYPE,VENDOR,TRAN'],
             capture_output=True, text=True, check=True,
         ).stdout
+        system_disk = get_system_disk()
         devices = []
         for dev in json.loads(out).get('blockdevices', []):
-            if dev.get('type') == 'disk' and dev.get('hotplug'):
-                tran = (dev.get('tran') or '').lower()
+            if dev.get('type') != 'disk' or dev.get('name') == system_disk:
+                continue
+            tran = (dev.get('tran') or '').lower()
+            # HOTPLUG is lsblk's guess from the sysfs bus ancestry, and it is
+            # False for USB disks on a Pi 5 (USB hangs off RP1 over PCIe), so a
+            # USB transport qualifies a disk on its own.
+            if _is_hotplug(dev.get('hotplug')) or tran == 'usb':
                 model = (dev.get('model') or dev.get('vendor') or '').strip()
                 if not model:
                     model = 'SD/MMC' if tran == 'mmc' else 'Unknown'

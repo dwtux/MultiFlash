@@ -104,6 +104,9 @@ class FlashApp(tk.Tk):
         self._tree.column('model',   width=200)
         self._tree.column('extract', width=100, anchor='center', stretch=False)
         self._tree.bind('<ButtonRelease-1>', self._on_tree_click)
+        self._tree.bind('<<TreeviewSelect>>', self._on_tree_select)
+        # Slots with no card report 0B: shown, but dimmed and not selectable.
+        self._tree.tag_configure('empty', foreground='#9a9a9a')
 
         scrollbar = ttk.Scrollbar(dev_frame, orient='vertical', command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)
@@ -217,9 +220,25 @@ class FlashApp(tk.Tk):
             self._update_verify_button()
         self._image_path.set(path)
 
+    def _is_empty_slot(self, row_id: str) -> bool:
+        return 'empty' in self._tree.item(row_id)['tags']
+
+    def _on_tree_select(self, _event=None) -> None:
+        """Keep empty slots out of the selection.
+
+        Treeview has no per-row disable, so instead of blocking the click we
+        undo it. The selection_remove re-fires this handler once, which then
+        finds nothing to drop and stops.
+        """
+        empty = [iid for iid in self._tree.selection() if self._is_empty_slot(iid)]
+        if empty:
+            self._tree.selection_remove(*empty)
+
     def _on_tree_click(self, event) -> None:
         col    = self._tree.identify_column(event.x)
         row_id = self._tree.identify_row(event.y)
+        if row_id and self._is_empty_slot(row_id):
+            return
         if col == '#4' and row_id:
             values = self._tree.item(row_id)['values']
             self._open_extract(str(values[0]), str(values[1]))
@@ -400,8 +419,11 @@ class FlashApp(tk.Tk):
     def _refresh_devices(self) -> None:
         self._tree.delete(*self._tree.get_children())
         for dev in self._get_devices():
+            empty = dev['size'].strip() in ('0B', '0')
             self._tree.insert('', 'end',
-                              values=(dev['path'], dev['size'], dev['model'], 'Extract ↓'))
+                              values=(dev['path'], dev['size'], dev['model'],
+                                      '' if empty else 'Extract ↓'),
+                              tags=('empty',) if empty else ())
 
     def _flash(self) -> None:
         image = self._image_path.get().strip()
